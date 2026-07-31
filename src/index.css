@@ -261,6 +261,13 @@ h2 { font-size: 20px; margin: 0 0 10px; }
   box-shadow: 0 10px 30px rgba(216,162,74,0.35);
   animation: popIn .4s var(--ease-spring);
 }
+.install-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.6);
+  display: grid; place-items: center; z-index: 90; padding: 16px;
+}
+.install-modal { max-width: 340px; width: 100%; text-align: left; }
+.install-modal ol { margin: 10px 0 16px; padding-left: 20px; line-height: 1.6; }
+.install-modal li { font-size: 13px; }
 @keyframes popIn { from { transform: translateY(20px) scale(.9); opacity: 0;} to { transform: none; opacity: 1;} }
 
 /* opening/lesson list */

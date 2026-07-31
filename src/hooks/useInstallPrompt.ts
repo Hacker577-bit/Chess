@@ -25,8 +25,12 @@ export function useInstallPrompt() {
 
   const promptInstall = async () => {
     if (!deferred) return;
-    await deferred.prompt();
-    await deferred.userChoice;
+    try {
+      await deferred.prompt();
+      await deferred.userChoice;
+    } catch {
+      // prompt can reject if dismissed or called twice; treat as no-install
+    }
     setDeferred(null);
   };
 

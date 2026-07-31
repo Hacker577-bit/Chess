@@ -28,15 +28,28 @@ export default defineConfig({
         ]
       },
       workbox: {
-        // Cache-first for ALL static assets → zero network after first load
+        // Content-hashed static assets are precached by generateSW with revision
+        // hashes; runtime caching only needs to cover navigation + media.
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2,ttf,json,webp}'],
         runtimeCaching: [
           {
-            urlPattern: ({ request }) => request.destination !== '',
+            // Pages: always try the network first so users get the latest build.
+            urlPattern: ({ request }) => request.mode === 'navigate',
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'chess-pages',
+              networkTimeoutSeconds: 4,
+              expiration: { maxEntries: 10, maxAgeSeconds: 60 * 60 * 24 },
+              cacheableResponse: { statuses: [0, 200] }
+            }
+          },
+          {
+            // Images/fonts: cache-first is fine, they are immutable-ish.
+            urlPattern: ({ request }) => request.destination === 'image' || request.destination === 'font',
             handler: 'CacheFirst',
             options: {
               cacheName: 'chess-static',
-              expiration: { maxEntries: 200, maxAgeSeconds: 60 * 60 * 24 * 365 },
+              expiration: { maxEntries: 200, maxAgeSeconds: 60 * 60 * 24 * 30 },
               cacheableResponse: { statuses: [0, 200] }
             }
           }
