@@ -1,0 +1,6 @@
+/* App-specific styles — component overrides live here */
+
+/* Hero spotlight effect — uses CSS custom properties set via JS */
+.hero {
+  position: relative;
+}
