@@ -18,7 +18,7 @@ export default function Openings() {
         </div>
       </div>
       <LessonPlayer key={o.name} title={o.name} desc={o.desc} fen="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
-            steps={o.moves.map(m => ({ ...m, caption: (m as any).caption || '' }))} />
+            steps={o.moves.map(m => ({ ...m, caption: (m as any).idea || '' }))} />
     </div>
   );
 }
