@@ -21,9 +21,9 @@ export type LevelConfig = {
 
 export const LEVELS: LevelConfig[] = [
   { id: 'beginner',     label: 'Beginner',     rating: 800,  maxDepth: 1, blunderRate: 0.35, tolerance: 120, budgetMs: 150 },
-  { id: 'amateur',      label: 'Amateur',      rating: 1200, maxDepth: 2, blunderRate: 0.12, tolerance: 60,  budgetMs: 500 },
-  { id: 'intermediate', label: 'Intermediate', rating: 1600, maxDepth: 4, blunderRate: 0,    tolerance: 0,   budgetMs: 3000 },
-  { id: 'grandmaster',  label: 'Grandmaster',  rating: 2400, maxDepth: 5, blunderRate: 0,    tolerance: 0,   budgetMs: 5000 },
+  { id: 'amateur',      label: 'Amateur',      rating: 1200, maxDepth: 3, blunderRate: 0,    tolerance: 60,  budgetMs: 700 },
+  { id: 'intermediate', label: 'Intermediate', rating: 1600, maxDepth: 5, blunderRate: 0,    tolerance: 0,   budgetMs: 3000 },
+  { id: 'grandmaster',  label: 'Grandmaster',  rating: 2400, maxDepth: 6, blunderRate: 0,    tolerance: 0,   budgetMs: 5000 },
 ];
 
 export const levelConfig = (id: Level): LevelConfig =>
@@ -241,9 +241,9 @@ function search(chess: Chess, depth: number, alpha: number, beta: number, ply: n
  * 
  * Difficulty layering:
  * - Beginner: Random blunders, shallow search
- * - Amateur: Beginner + reduced blunders, basic search
- * - Intermediate: Amateur + NO blunders, SEE trades, hanging piece detection
- * - Grandmaster: Intermediate + positional play, king safety, pawn structure
+ * - Amateur: No random blunders, safe-move filtering, safety + tactical eval
+ * - Intermediate: Amateur + deeper search, positional play
+ * - Grandmaster: Intermediate + deepest search, full strategic eval
  */
 export function chooseMove(chess: Chess, level: Level): Move | null {
   const cfg = levelConfig(level);
@@ -251,11 +251,11 @@ export function chooseMove(chess: Chess, level: Level): Move | null {
   if (!moves.length) return null;
   if (moves.length === 1) return moves[0];
 
-  // Build evaluation function based on level
-  // Each level includes all features of lower levels
-  const useSafety = level === 'intermediate' || level === 'grandmaster';
-  const useTactical = level === 'intermediate' || level === 'grandmaster';
-  const usePositional = level === 'grandmaster';
+  // Build evaluation function based on level.
+  // Amateur and above never blunder; beginner keeps the random-move chaos.
+  const useSafety = level === 'amateur' || level === 'intermediate' || level === 'grandmaster';
+  const useTactical = level === 'amateur' || level === 'intermediate' || level === 'grandmaster';
+  const usePositional = level === 'intermediate' || level === 'grandmaster';
 
   const evalFn: (c: Chess) => number = (chess) => {
     let score = rawEval(chess);
@@ -383,7 +383,16 @@ function searchBestMove(
   nodes = 0;
   deadline = Date.now() + cfg.budgetMs;
 
-  // Iterative deepening with proper move ordering
+  // Iterative deepening with proper move ordering and PVS at the root.
+  //
+  // Tolerance 0 (intermediate/grandmaster): the first move gets a full window,
+  // every later move gets a null-window probe first (fast fail-high on worse
+  // moves), and only moves that beat the current best are re-searched exactly.
+  // Final pick is strictly the best move, so it can never be a hidden worse one.
+  //
+  // Tolerance > 0 (amateur): every move is searched with a full window so the
+  // random pool contains true scores — a fail-high probe would otherwise record
+  // `alpha` for a move that is secretly much worse, letting it sneak into the pool.
   let order = ordered(moves, chess, cfg.maxDepth);
   let best: { m: Move; v: number }[] = order.map(m => ({ m, v: 0 }));
 
@@ -396,8 +405,16 @@ function searchBestMove(
         chess.move(m);
         let v: number;
         try {
-          const beta = cfg.tolerance > 0 ? Infinity : -alpha;
-          v = -search(chess, depth - 1, -Infinity, beta, 1, evalFn);
+          if (cfg.tolerance > 0) {
+            v = -search(chess, depth - 1, -Infinity, Infinity, 1, evalFn);
+          } else if (alpha === -Infinity) {
+            v = -search(chess, depth - 1, -Infinity, Infinity, 1, evalFn);
+          } else {
+            v = -search(chess, depth - 1, -Infinity, -alpha, 1, evalFn);
+            if (v > alpha) {
+              v = -search(chess, depth - 1, -Infinity, Infinity, 1, evalFn);
+            }
+          }
         } finally {
           chess.undo();
         }
@@ -413,6 +430,8 @@ function searchBestMove(
     order = scored.map(s => s.m);
     if (Math.abs(best[0].v) > MATE - 100) break;
   }
+
+  if (cfg.tolerance <= 0) return best[0].m;
 
   const cutoff = best[0].v - cfg.tolerance;
   const pool = best.filter(s => s.v >= cutoff);
