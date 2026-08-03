@@ -2,6 +2,7 @@ import { Chess } from 'chess.js';
 import type { Move, PieceSymbol, Square } from 'chess.js';
 import { rawEval, positionalBonus, pieceSafetyBonus, tacticalBonus, bishopAttackBonus } from './evaluation';
 import { pieceAttacksSquare, countAttackers } from './attacks';
+import { OPENINGS } from '../data/openings';
 
 export type Level = 'beginner' | 'amateur' | 'intermediate' | 'grandmaster';
 
@@ -31,6 +32,78 @@ export const levelConfig = (id: Level): LevelConfig =>
 
 const MATE = 100_000;
 const VAL: Record<PieceSymbol, number> = { p: 100, n: 320, b: 330, r: 500, q: 900, k: 20_000 };
+
+/* ------------------------------------------------------------------ */
+/* Opening book: the vs-computer bot plays the exact openings that are  */
+/* presented in the Learn > Openings session.                           */
+/* ------------------------------------------------------------------ */
+
+type BookEntry = { from: string; to: string; promotion?: string };
+
+// Book key = board + turn + castling rights + en-passant, ignoring the
+// halfmove/fullmove clocks so clocks don't knock a position out of book.
+const bookKey = (fen: string) => fen.split(' ').slice(0, 4).join(' ');
+
+// A position can belong to several openings (e.g. after 1.e4 the bot may
+// answer e5, c5, e6, c6 or d5), so store every legal candidate per key and
+// pick randomly — the bot "uses one of the openings" instead of repeating a
+// single canned line forever.
+const BOOK = new Map<string, BookEntry[]>();
+let bookBuilt = false;
+
+function buildBook() {
+  if (bookBuilt) return;
+  bookBuilt = true;
+  for (const opening of OPENINGS) {
+    const c = new Chess();
+    for (let i = 0; i < opening.moves.length; i++) {
+      const step = opening.moves[i];
+      const key = bookKey(c.fen());
+      const entry: BookEntry = { from: step.from, to: step.to, promotion: (step as any).promotion };
+      const list = BOOK.get(key) ?? [];
+      if (!list.some(e => e.from === entry.from && e.to === entry.to && e.promotion === entry.promotion)) {
+        list.push(entry);
+      }
+      BOOK.set(key, list);
+      try {
+        c.move({ from: step.from, to: step.to, promotion: (step as any).promotion });
+      } catch {
+        break; // defensive: skip a malformed line
+      }
+    }
+  }
+}
+
+function bookMove(chess: Chess): Move | null {
+  buildBook();
+  const entries = BOOK.get(bookKey(chess.fen()));
+  if (!entries?.length) return null;
+  const legal = chess.moves({ verbose: true }).filter(m =>
+    entries.some(e =>
+      m.from === e.from && m.to === e.to && (m.promotion ?? undefined) === e.promotion));
+  if (!legal.length) return null;
+  return legal[Math.floor(Math.random() * legal.length)];
+}
+
+/* ------------------------------------------------------------------ */
+/* Castling priority: once the opening is over, get the king to safety  */
+/* before anything else.                                                */
+/* ------------------------------------------------------------------ */
+
+function castlePriority(chess: Chess): Move | null {
+  const moves = chess.moves({ verbose: true });
+  // Prefer kingside castling (safer) over queenside.
+  const castle = moves.find(m => m.flags.includes('k')) ?? moves.find(m => m.flags.includes('q'));
+  if (!castle) return null;
+  // Only in the opening / early-middlegame, not once we're deep in.
+  if (chess.history().length > 40) return null;
+  // Safety: castling must not leave a piece hanging.
+  chess.move(castle);
+  const safe = !moveHangsPiece(chess, castle);
+  chess.undo();
+  if (!safe) return null;
+  return castle;
+}
 
 /**
  * Static Exchange Evaluation (SEE) — calculates the final material balance
@@ -250,6 +323,14 @@ export function chooseMove(chess: Chess, level: Level): Move | null {
   const moves = chess.moves({ verbose: true });
   if (!moves.length) return null;
   if (moves.length === 1) return moves[0];
+
+  // Play the opening from the Learn > Openings session when the position is in book.
+  const opening = bookMove(chess);
+  if (opening) return opening;
+
+  // After the opening, castling is the first priority.
+  const castle = castlePriority(chess);
+  if (castle) return castle;
 
   // Build evaluation function based on level.
   // Amateur and above never blunder; beginner keeps the random-move chaos.
